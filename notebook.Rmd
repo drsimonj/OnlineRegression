@@ -157,7 +157,8 @@ compressed_regression <- function(dcrossp, n) {
   cor_m   <- isd * covar_m * rep(isd, each = nrow(covar_m))
   
   # Model Degrees of freedom (n - param count)
-  df <- n - (nrow(dcrossp) + 1) # '1' for intercept
+  # Note, params include intercept. nrow() adds one for `y`, which works
+  df <- n - nrow(dcrossp)
   
   # Calculate R-squared to then obtain Mean-squared Error
   cor_yx <- cor_m[-1,1]
@@ -165,7 +166,7 @@ compressed_regression <- function(dcrossp, n) {
   r2 <- (t(cor_yx) %*% solve(cor_xx) %*% cor_yx)[1,1]
   sst <- dcrossp[1,1]
   sse <- sst * (1 - r2)
-  mse <- sse / (df + 1)
+  mse <- sse / df
   
   ## Step 2: compute regression results
   
