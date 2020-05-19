@@ -1,0 +1,208 @@
+---
+title: "Realtime regression"
+output: html_document
+---
+
+```{r knit_setup}
+knitr::opts_chunk$set(
+  comment = "#>",
+  fig.path = "temp/"
+)
+```
+```{r setup_packages}
+#library(tidyverse)
+```
+```{r setup_plots}
+# Set default theme as minimal
+#theme_set(theme_minimal())
+```
+```{r}
+# Set a seed to make the analysis reproducible
+set.seed(20200518)
+```
+
+# Data compression
+
+```{r}
+#' Take a vector of values representing new data for a sequence
+#' of metrics, and a compressed object of any previous data if
+#' available, and return the compressed data needed for regression
+#' 
+#' @param vals Vector of new metric values
+#'        (should maintain metric order)
+#'
+#' @param last_compression Output from most recent run of this
+#'         function (leave empty on first run)
+#'   
+update_compression <- function(vals, last_compression) {
+  # Note number of metric values
+  n_metrics <- length(vals)
+  
+  # Set list structure on first run
+  if (missing(last_compression)) {
+    last_compression <- list(
+      n     = 0,
+      means = rep(0, n_metrics),
+      dcrossp = matrix(0, nrow = n_metrics, ncol = n_metrics)
+    )
+  }
+  
+  # Initialize new compression to previous one
+  compression <- last_compression
+  
+  # Increment sample size
+  compression$n <- last_compression$n + 1
+  
+  # Calculate new means
+  errs <- vals - last_compression$means
+  compression$means <- last_compression$means + errs / compression$n
+  
+  # Update deviation cross-products
+  for (i in 1:n_metrics) {
+    for (j in 1:n_metrics) {
+      compression$dcrossp[i, j] <-
+        compression$dcrossp[i, j] +
+        (vals[i] - last_compression$means[i]) *
+        (vals[j] - compression$means[j])
+    }
+  }
+  
+  # Fill lower-triangle to make matrix symmetrical
+  tmp_m <- t(compression$dcrossp)
+  compression$dcrossp[lower.tri(compression$dcrossp)] <- tmp_m[lower.tri(tmp_m)]
+  
+  return (compression)
+}
+```
+
+```{r}
+# Simulate some data
+final_n <- 10
+x1 <- rnorm(final_n, mean = 2)
+x2 <- x1*.5 + rnorm(final_n, mean = 5)
+x3 <- x1*-1 + x2*2 + rnorm(final_n)
+xs <- cbind(x1, x2, x3)
+```
+```{r}
+# A simple data set of 10 observations
+xs
+```
+
+```{r}
+# Compress first row of data
+compressed_d <- update_compression(xs[1,])
+compressed_d
+```
+
+```{r}
+# Iteratively update the compression with remaining data
+for (i in 2:nrow(xs)) {
+  compressed_d <- update_compression(xs[i,], compressed_d)
+}
+
+compressed_d
+```
+
+```{r}
+apply(xs, 2, mean)
+```
+
+
+```{r}
+# The sums of squared deviations are on the diagonal.
+# E.g., y is first element in the matrix
+sum((x1 - mean(x1))^2)
+```
+```{r}
+# Off-diagonals are the deviation cross-products
+# e.g., y and x1 are in col 1 row 2 AND col 2 row 1
+sum((x1 - mean(x1)) * (x2 - mean(x2)))
+```
+
+
+```{r}
+xs_d <- cbind(x1 - mean(x1), x2 - mean(x2), x3 - mean(x3))
+t(xs_d) %*% xs_d
+```
+
+```{r}
+# Same as above using the `xs` object
+xs_d <- sweep(xs, 2, apply(xs, 2, mean)) # all deviation scores
+t(xs_d) %*% xs_d
+```
+
+
+
+# Regression
+
+```{r}
+#' Given data compressed to a sample size and
+#' deviation cross-product matrix, compute a
+#' regression summary table for the regression
+#' coefficients (excluding an intercept)
+#' 
+#' @param dcrossp Deviation cross-product matrix.
+#'        Assumes that the outcome variable is in
+#'        row 1, column 1, and additional columns
+#'        are all terms entered into the regression.
+#' 
+#' @param n Sample size
+#' 
+compressed_regression <- function(dcrossp, n) {
+  ## Step 1: get convenience values
+  
+  # Get covariance and correlation matrices
+  covar_m <- dcrossp / (n-1)
+  isd     <- sqrt(1/diag(covar_m)) # inverse standard deviations
+  cor_m   <- isd * covar_m * rep(isd, each = nrow(covar_m))
+  
+  # Model Degrees of freedom (n - param count)
+  df <- n - (nrow(dcrossp) + 1) # '1' for intercept
+  
+  # Calculate R-squared to then obtain Mean-squared Error
+  cor_yx <- cor_m[-1,1]
+  cor_xx <- cor_m[-1,-1]
+  r2 <- (t(cor_yx) %*% solve(cor_xx) %*% cor_yx)[1,1]
+  sst <- dcrossp[1,1]
+  sse <- sst * (1 - r2)
+  mse <- sse / (df + 1)
+  
+  ## Step 2: compute regression results
+  
+  # Coefficients
+  xs_xs <- covar_m[-1, -1]
+  y_xs  <- covar_m[-1, 1, drop = FALSE]
+  bxs   <- solve(xs_xs, y_xs)[, 1]
+  
+  # Standard errors
+  # (placeholder values bound and then dropped for intercept)
+  xprimex <- dcrossp[-1, -1]
+  xprimex <- cbind(0,  xprimex)
+  xprimex <- rbind(c(1, rep(0, nrow(xprimex))),  xprimex)
+  inverse_xprimex <- solve(xprimex)
+  var_bxs <- mse * diag(inverse_xprimex)[-1]
+  se_bxs <- sqrt(var_bxs)
+  
+  # t and p values
+  ts <- bxs / se_bxs
+  ps <- 2*pt(-abs(ts), df = df)
+  
+  # Return results as table
+  data.frame(coefficient = bxs,
+             standard_error = se_bxs,
+             t_value = ts,
+             p_value = ps)
+}
+```
+```{r}
+compressed_regression(
+  compressed_d$dcrossp,
+  compressed_d$n
+)
+```
+
+```{r}
+summary(lm(x1 ~ x2 + x3))$coefficients[-1,]
+```
+
+

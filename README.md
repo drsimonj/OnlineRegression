@@ -1,6 +1,6 @@
-# Template R Project
+# Real-time regression
 
-A template R project I like to use when starting new work.
+A script that demonstrates real-time regression involving updating a compressed data object as new units enter an experiment, and then converting this into regression results.
 
 ## Repo notes
 

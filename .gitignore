@@ -1,6 +1,7 @@
 packrat/lib*/
 *.html
 temp/*
+R/*
 
 # DEFAULT gitignore setup from https://github.com/github/gitignore/blob/master/R.gitignore
 
